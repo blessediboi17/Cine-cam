@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cine Cam Remote</title>
+<style>
+:root{--panel:#0d0e10;--line:#24272c;--tx:#ecebe6;--mut:#7e838c;--rec:#ff3b30;--acc:#ffb020;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#000;color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums;display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:520px;display:flex;flex-direction:column;gap:14px}
+header{display:flex;justify-content:space-between;align-items:center;color:var(--mut);font-size:13px}
+h1{font-size:16px;margin:0;color:var(--tx)}
+#rec{height:64px;border-radius:14px;border:2px solid #fff;background:#16181c;color:var(--tx);font:600 17px system-ui;display:flex;align-items:center;justify-content:center;gap:12px;cursor:pointer}
+#rec i{width:18px;height:18px;border-radius:50%;background:var(--rec)}
+#rec.on{background:var(--rec);border-color:var(--rec)}
+#rec.on i{background:#fff;border-radius:4px}
+#rows{display:flex;flex-direction:column;gap:10px}
+.r{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;grid-template-columns:1fr auto auto;gap:6px 10px;align-items:center}
+.r b{font-weight:600}
+.r .v{color:var(--acc);font-weight:600}
+.r input{grid-column:1/-1;width:100%;accent-color:var(--acc);height:30px}
+button.s{font:inherit;color:var(--tx);background:#16181c;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer}
+button.s.on{border-color:var(--acc);color:var(--acc)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#msg{color:var(--mut);text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Cine Cam Remote</h1><span id="st">Connecting…</span></header>
+  <button id="rec" disabled><i></i><span id="rt">Record</span></button>
+  <div id="rows"></div>
+  <button class="s" id="torch" hidden>Torch</button>
+  <div id="msg">Space bar starts and stops recording.</div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+const q=new URLSearchParams(location.search),id=q.get('id'),pin=q.get('pin');
+const $=s=>document.querySelector(s);
+let conn=null,built='',drag=null,last=0;
+const rowEl={};
+function send(o){if(conn&&conn.open)conn.send(o)}
+function mk(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e}
+function render(s){
+  const sig=s.keys.join(',');
+  if(sig!==built){
+    built=sig;$('#rows').replaceChildren();
+    s.keys.forEach(k=>{
+      const r=mk('div','r'),lab=mk('b','',s.lab[k]),val=mk('span','v','–'),box=mk('span');
+      const sl=document.createElement('input');sl.type='range';sl.min=0;sl.max=1000;sl.setAttribute('aria-label',s.lab[k]);
+      sl.oninput=()=>{const n=performance.now();if(n-last>50){last=n;send({t:'pos',k,p:+sl.value})}};
+      sl.onchange=()=>send({t:'pos',k,p:+sl.value});
+      sl.onpointerdown=()=>drag=k;sl.onpointerup=()=>drag=null;
+      r.append(lab,val);
+      if(s.mode[k]){const a=mk('button','s','Auto');a.onclick=()=>send({t:'auto',k});box.append(a)}
+      if(k==='exposureTime'){const b=mk('button','s','180°');b.onclick=()=>send({t:'snap'});box.append(' ',b)}
+      r.append(box,sl);$('#rows').append(r);rowEl[k]={val,sl};
+    });
+  }
+  s.keys.forEach(k=>{const e=rowEl[k];if(!e)return;e.val.textContent=s.txt[k];if(drag!==k)e.sl.value=s.pos[k]});
+  const rb=$('#rec');rb.disabled=false;rb.classList.toggle('on',s.rec);
+  $('#rt').textContent=s.rec?'Stop  '+s.time:'Record';
+  $('#st').textContent='Connected · '+s.fmt;
+  $('#torch').hidden=!s.torchAvail;$('#torch').classList.toggle('on',!!s.torch);
+}
+$('#rec').onclick=()=>send({t:'rec'});
+$('#torch').onclick=()=>send({t:'torch'});
+addEventListener('keydown',e=>{if(e.code==='Space'&&!$('#rec').disabled){e.preventDefault();send({t:'rec'})}});
+if(!id||!pin){$('#st').textContent='Open the remote link from the phone.'}
+else{
+  const peer=new Peer();
+  const connect=()=>{
+    if(conn)try{conn.close()}catch(e){}
+    conn=peer.connect(id,{metadata:{role:'remote',pin},reliable:true});
+    conn.on('open',()=>{$('#st').textContent='Connected'});
+    conn.on('data',d=>{if(d&&d.t==='state')render(d);else if(d&&d.t==='denied')$('#st').textContent='Wrong or old link. Copy the remote link again.'});
+    conn.on('close',()=>{$('#st').textContent='Reconnecting…';$('#rec').disabled=true;setTimeout(connect,2000)});
+  };
+  peer.on('open',connect);
+  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
+  peer.on('error',e=>{$('#st').textContent=e.type==='peer-unavailable'?'Phone not live yet. Tap Live in Cine Cam…':'Error: '+e.type;if(e.type==='peer-unavailable')setTimeout(connect,3000)});
+}
+</script>
+</body>
+</html>
